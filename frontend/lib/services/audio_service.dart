@@ -18,8 +18,16 @@ class AudioService {
   static const int durationSeconds = 5;
   static const int channels = 1;
 
+  bool get isSupportedPlatform =>
+      Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+
   /// Request microphone permission
   Future<bool> requestMicrophonePermission() async {
+    if (!isSupportedPlatform) {
+      print("❌ Microphone recording is not supported on this platform.");
+      return false;
+    }
+
     final status = await Permission.microphone.request();
     return status.isGranted;
   }
@@ -27,6 +35,10 @@ class AudioService {
   /// Check if recording is supported
   Future<bool> isRecordingSupported() async {
     try {
+      if (!isSupportedPlatform) {
+        return false;
+      }
+
       return await _audioRecorder.hasPermission();
     } catch (e) {
       print("❌ Permission check failed: $e");
@@ -37,6 +49,11 @@ class AudioService {
   /// Start recording
   Future<String?> startRecording() async {
     try {
+      if (!isSupportedPlatform) {
+        print("❌ Recording is not supported on this platform.");
+        return null;
+      }
+
       final hasPermission = await _audioRecorder.hasPermission();
 
       if (!hasPermission) {

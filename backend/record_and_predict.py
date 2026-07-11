@@ -7,10 +7,10 @@ import os
 # =========================
 # CONFIGURATION
 # =========================
-MODEL_PATH = "model/sound_model.h5"
+MODEL_PATH = "model/sound_model_custom.h5"
 SAMPLE_RATE = 16000  # Must match the training sample rate
 DURATION = 5         # Seconds to record (ESC-50 standard)
-LABELS = ["dog", "rain", "crying_baby", "door_wood_knock"]
+LABELS = ["siren", "crying_baby", "door_wood_knock", "glass_breaking"]
 TARGET_SHAPE = (64, 128)
 CONFIDENCE_THRESHOLD = 0.80
 

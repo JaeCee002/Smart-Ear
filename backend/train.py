@@ -6,7 +6,7 @@ from tensorflow.keras import layers, models
  
 # ====== CONFIG ======
 DATA_PATH = "ESC-50-master" # Path to ESC-50 dataset
-TARGET_CLASSES = ["dog", "rain", "crying_baby", "door_wood_knock"]
+TARGET_CLASSES = ["siren", "crying_baby", "door_wood_knock", "glass_breaking"]
 
 SAMPLE_RATE = 16000
 FIXED_SHAPE = (64, 128)

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:math' as math;
+import 'dart:io';
 import 'services/api_services.dart';
 import 'services/audio_service.dart';
 
@@ -35,7 +35,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   late AnimationController _arrowController;
-  late AnimationController _pulseController;
+  //late AnimationController _pulseController;
   late AnimationController _recordingController;
 
   final AudioService _audioService = AudioService();
@@ -54,10 +54,10 @@ class _DashboardScreenState extends State<DashboardScreen>
       duration: const Duration(seconds: 2),
     );
 
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
+    // _pulseController = AnimationController(
+    //   vsync: this,
+    //   duration: const Duration(seconds: 3),
+    // )..repeat();
 
     _recordingController = AnimationController(
       vsync: this,
@@ -79,7 +79,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     _arrowController.dispose();
-    _pulseController.dispose();
+    // _pulseController.dispose();
     _recordingController.dispose();
     _audioService.dispose();
     super.dispose();
@@ -88,6 +88,16 @@ class _DashboardScreenState extends State<DashboardScreen>
   /// Record audio for 5 seconds and get prediction
   Future<void> recordAndPredict() async {
     if (isRecording || isProcessing) return;
+
+    if (!(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+      setState(() {
+        errorMessage =
+            "Microphone recording is not supported on this platform.";
+        detectedSound = "Error";
+        confidence = 0.0;
+      });
+      return;
+    }
 
     setState(() {
       isRecording = true;
@@ -163,16 +173,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     double direction = 0.0;
 
     switch (sound.toLowerCase()) {
-      case "dog":
+      case "siren":
         direction = 0.0; // North
         break;
-      case "rain":
+      case "crying_baby":
         direction = 0.25; // East
         break;
-      case "crying_baby":
+      case "door_wood_knock":
         direction = 0.5; // South
         break;
-      case "door_wood_knock":
+      case "glass_breaking":
         direction = 0.75; // West
         break;
       default:
@@ -214,8 +224,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           children: [
             const SizedBox(height: 20),
             Center(child: _buildRadarDisplay()),
-            const SizedBox(height: 40),
+            const SizedBox(height: 20),
             _buildMetricsSection(),
+            _recordButton(),
           ],
         ),
       ),
@@ -243,121 +254,121 @@ class _DashboardScreenState extends State<DashboardScreen>
 
           // DIRECTIONS
           const Positioned(
-            top: 8,
+            top: 6,
             child: Text(
               'N',
               style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
             ),
           ),
           const Positioned(
-            bottom: 8,
+            bottom: 6,
             child: Text(
               'S',
               style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
             ),
           ),
           const Positioned(
-            left: 8,
+            left: 6,
             child: Text(
               'W',
               style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
             ),
           ),
           const Positioned(
-            right: 8,
+            right: 6,
             child: Text(
               'E',
               style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
             ),
           ),
 
-          // Animated Pulse
-          _RadarPulseRing(animation: _pulseController),
+          //         // Animated Pulse
+          //         // _RadarPulseRing(animation: _pulseController),
 
-          // The Glass Radar Face
-          Container(
-            width: 240,
-            height: 240,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  const Color(0xFF00E5FF).withOpacity(0.05),
-                  Colors.transparent,
-                ],
-              ),
-              border: Border.all(color: Colors.white10),
-            ),
-          ),
+          //         // The Glass Radar Face
+          //         Container(
+          //           width: 240,
+          //           height: 240,
+          //           decoration: BoxDecoration(
+          //             shape: BoxShape.circle,
+          //             gradient: RadialGradient(
+          //               colors: [
+          //                 const Color(0xFF00E5FF).withOpacity(0.05),
+          //                 Colors.transparent,
+          //               ],
+          //             ),
+          //             border: Border.all(color: Colors.white10),
+          //           ),
+          //         ),
 
           // CENTER ICON
-          ScaleTransition(
-            scale: isRecording
-                ? Tween(begin: 1.0, end: 1.2).animate(_recordingController)
-                : AlwaysStoppedAnimation(1.0),
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFF1A1A1C),
-                boxShadow: [
-                  BoxShadow(
-                    color: isRecording
-                        ? const Color(0xFFFF5252).withOpacity(0.5)
-                        : const Color(0xFF00E5FF).withOpacity(0.1),
-                    blurRadius: 20,
-                    spreadRadius: 5,
-                  ),
-                ],
-              ),
-              child: Icon(
-                isRecording ? Icons.mic : Icons.sensors,
-                color: isRecording
-                    ? const Color(0xFFFF5252)
-                    : const Color(0xFF00E5FF),
-                size: 40,
-              ),
-            ),
-          ),
+          // ScaleTransition(
+          //   scale: isRecording
+          //       ? Tween(begin: 1.0, end: 1.2).animate(_recordingController)
+          //       : AlwaysStoppedAnimation(1.0),
+          //   child: Container(
+          //     padding: const EdgeInsets.all(20),
+          //     decoration: BoxDecoration(
+          //       shape: BoxShape.circle,
+          //       color: const Color(0xFF1A1A1C),
+          //       boxShadow: [
+          //         BoxShadow(
+          //           color: isRecording
+          //               ? const Color(0xFFFF5252).withOpacity(0.5)
+          //               : const Color(0xFF00E5FF).withOpacity(0.1),
+          //           blurRadius: 20,
+          //           spreadRadius: 5,
+          //         ),
+          //       ],
+          //     ),
+          //     child: Icon(
+          //       isRecording ? Icons.mic : Icons.sensors,
+          //       color: isRecording
+          //           ? const Color(0xFFFF5252)
+          //           : const Color(0xFF00E5FF),
+          //       size: 40,
+          //     ),
+          //   ),
+          // ),
 
           // THE DIRECTIONAL ARROW
-          RotationTransition(
-            turns: _arrowController,
-            child: SizedBox(
-              width: 200,
-              height: 200,
-              child: Stack(
-                children: [
-                  Align(
-                    alignment: Alignment.topCenter,
-                    child: Column(
-                      children: [
-                        const Icon(
-                          Icons.navigation,
-                          color: Color(0xFF00E5FF),
-                          size: 30,
-                        ),
-                        Container(
-                          width: 2,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                const Color(0xFF00E5FF),
-                                const Color(0xFF00E5FF).withOpacity(0),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          // RotationTransition(
+          //   turns: _arrowController,
+          //   child: SizedBox(
+          //     width: 200,
+          //     height: 200,
+          //     child: Stack(
+          //       children: [
+          //         Align(
+          //           alignment: Alignment.topCenter,
+          //           child: Column(
+          //             children: [
+          //               const Icon(
+          //                 Icons.navigation,
+          //                 color: Color(0xFF00E5FF),
+          //                 size: 30,
+          //               ),
+          //               Container(
+          //                 width: 2,
+          //                 height: 40,
+          //                 decoration: BoxDecoration(
+          //                   gradient: LinearGradient(
+          //                     begin: Alignment.topCenter,
+          //                     end: Alignment.bottomCenter,
+          //                     colors: [
+          //                       const Color(0xFF00E5FF),
+          //                       const Color(0xFF00E5FF).withOpacity(0),
+          //                     ],
+          //                   ),
+          //                 ),
+          //               ),
+          //             ],
+          //           ),
+          //         ),
+          //       ],
+          //     ),
+          //   ),
+          // ),
 
           // Recording Countdown
           // if (isRecording)
@@ -373,27 +384,133 @@ class _DashboardScreenState extends State<DashboardScreen>
           //   ),
 
           // Detected Sound Icon
-          if (detectedSound == "dog")
-            Center(child: Icon(Icons.pets, color: Color(0xFFFF5252), size: 30))
-          else if (detectedSound == "rain")
-            Center(child: Icon(Icons.grain, color: Color(0xFF00E5FF), size: 30))
+          if (detectedSound == "siren")
+            Center(
+              child: _buildFlaticonIcon(
+                'assets/icons/Icons/alarm.png',
+                color: const Color(0xFFFF5252),
+                size: 30,
+                fallback: Icons.warning_amber,
+              ),
+            )
           else if (detectedSound == "crying_baby")
             Center(
-              child: Icon(
-                Icons.baby_changing_station,
-                color: Color(0xFFFF5252),
+              child: _buildFlaticonIcon(
+                'assets/icons/Icons/baby.png',
+                color: const Color.fromARGB(143, 255, 82, 82),
                 size: 30,
+                fallback: Icons.baby_changing_station,
               ),
             )
           else if (detectedSound == "door_wood_knock")
             Center(
-              child: Icon(
-                Icons.door_back_door,
-                color: Color(0xFF00E5FF),
+              child: _buildFlaticonIcon(
+                'assets/icons/Icons/door.png',
+                color: const Color(0xFF00E5FF),
                 size: 30,
+                fallback: Icons.door_back_door,
+              ),
+            )
+          else if (detectedSound == "glass_breaking")
+            Center(
+              child: _buildFlaticonIcon(
+                'assets/icons/Icons/broken-glass.png',
+                color: const Color(0xFFFFD54F),
+                size: 30,
+                fallback: Icons.wine_bar,
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFlaticonIcon(
+    String imagePath, {
+    required Color color,
+    required double size,
+    required IconData fallback,
+  }) {
+    Widget fallbackIcon(
+      BuildContext context,
+      Object error,
+      StackTrace? stackTrace,
+    ) {
+      return Icon(fallback, color: color, size: size);
+    }
+
+    if (imagePath.startsWith('http')) {
+      return Image.network(
+        imagePath,
+        width: size,
+        height: size,
+        color: color,
+        colorBlendMode: BlendMode.srcIn,
+        errorBuilder: fallbackIcon,
+      );
+    }
+
+    return Image.asset(
+      imagePath,
+      width: size,
+      height: size,
+      color: color,
+      colorBlendMode: BlendMode.srcIn,
+      errorBuilder: fallbackIcon,
+    );
+  }
+
+  //record button
+  Widget _recordButton() {
+    return SizedBox(
+      width: 80,
+      height: 80,
+      child: ScaleTransition(
+        scale: isRecording
+            ? Tween<double>(begin: 1.0, end: 1.2).animate(_recordingController)
+            : const AlwaysStoppedAnimation<double>(1.0),
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF1A1A1C),
+            boxShadow: [
+              BoxShadow(
+                color: isRecording
+                    ? const Color(0xFFFF5252).withOpacity(0.5)
+                    : const Color(0xFF00E5FF).withOpacity(0.1),
+                blurRadius: 20,
+                spreadRadius: 5,
+              ),
+            ],
+          ),
+          child: ElevatedButton(
+            onPressed: (isRecording || isProcessing) ? null : recordAndPredict,
+            style: ElevatedButton.styleFrom(
+              shape: const CircleBorder(),
+              padding: EdgeInsets.zero,
+              backgroundColor: (isRecording || isProcessing)
+                  ? Colors.grey
+                  : const Color(0xFF00E5FF),
+            ),
+            child: isRecording
+                ? Text(
+                    '$recordingCountdown',
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  )
+                : isProcessing
+                ? const Text(
+                    'Processing...',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  )
+                : const Icon(Icons.mic, color: Colors.black, size: 40),
+          ),
+        ),
       ),
     );
   }
@@ -404,23 +521,23 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "LIVE SPECTRUM",
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.5,
-              color: Colors.white38,
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildFrequencyBar(),
-          const SizedBox(height: 24),
+          // const Text(
+          //   "LIVE SPECTRUM",
+          //   style: TextStyle(
+          //     fontSize: 12,
+          //     fontWeight: FontWeight.bold,
+          //     letterSpacing: 1.5,
+          //     color: Colors.white38,
+          //   ),
+          // ),
+          // const SizedBox(height: 16),
+          // _buildFrequencyBar(),
+          const SizedBox(height: 15),
           _buildCriticalAlert(),
-          const SizedBox(height: 24),
+          const SizedBox(height: 15),
           if (errorMessage.isNotEmpty)
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 color: const Color(0xFFFF5252).withOpacity(0.2),
                 borderRadius: BorderRadius.circular(12),
@@ -432,68 +549,68 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
             ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: (isRecording || isProcessing)
-                  ? null
-                  : recordAndPredict,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: (isRecording || isProcessing)
-                    ? Colors.grey
-                    : const Color(0xFF00E5FF),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 16,
-                ),
-              ),
-              child: Text(
-                isRecording
-                    ? "Recording... $recordingCountdown"
-                    : isProcessing
-                    ? "Processing..."
-                    : "Start Recording",
-                style: const TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
+          // SizedBox(
+          //   width: double.infinity,
+          //   child: ElevatedButton(
+          //     onPressed: (isRecording || isProcessing)
+          //         ? null
+          //         : recordAndPredict,
+          //     style: ElevatedButton.styleFrom(
+          //       backgroundColor: (isRecording || isProcessing)
+          //           ? Colors.grey
+          //           : const Color(0xFF00E5FF),
+          //       shape: RoundedRectangleBorder(
+          //         borderRadius: BorderRadius.circular(16),
+          //       ),
+          //       padding: const EdgeInsets.symmetric(
+          //         horizontal: 24,
+          //         vertical: 16,
+          //       ),
+          //     ),
+          // child: Text(
+          //   isRecording
+          //       ? '$recordingCountdown'
+          //       : isProcessing
+          //       ? "Processing..."
+          //       : "Start Recording",
+          //   style: const TextStyle(
+          //     color: Colors.black,
+          //     fontWeight: FontWeight.bold,
+          //   ),
+          // ),
+          //         ),
+          //       ),
+          //       const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  Widget _buildFrequencyBar() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1C),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: List.generate(20, (index) {
-          return Container(
-            width: 6,
-            height: 10.0 + math.Random().nextInt(40),
-            decoration: BoxDecoration(
-              color: index > 14
-                  ? const Color(0xFFFF5252)
-                  : const Color(0xFF00E5FF),
-              borderRadius: BorderRadius.circular(10),
-            ),
-          );
-        }),
-      ),
-    );
-  }
+  // Widget _buildFrequencyBar() {
+  //   return Container(
+  //     padding: const EdgeInsets.all(20),
+  //     decoration: BoxDecoration(
+  //       color: const Color(0xFF1A1A1C),
+  //       borderRadius: BorderRadius.circular(24),
+  //     ),
+  //     child: Row(
+  //       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  //       crossAxisAlignment: CrossAxisAlignment.end,
+  //       children: List.generate(20, (index) {
+  //         return Container(
+  //           width: 6,
+  //           height: 10.0 + math.Random().nextInt(40),
+  //           decoration: BoxDecoration(
+  //             color: index > 14
+  //                 ? const Color(0xFFFF5252)
+  //                 : const Color(0xFF00E5FF),
+  //             borderRadius: BorderRadius.circular(10),
+  //           ),
+  //         );
+  //       }),
+  //     ),
+  //   );
+  // }
 
   Widget _buildCriticalAlert() {
     return Container(

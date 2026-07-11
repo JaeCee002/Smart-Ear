@@ -18,10 +18,10 @@ DURATION = 5
 TARGET_SHAPE = (64, 128)
 
 LABELS = [
-    "dog",
-    "rain",
+    "siren",
     "crying_baby",
-    "door_wood_knock"
+    "door_wood_knock",
+    "glass_breaking"
 ]
 
 CONFIDENCE_THRESHOLD = 0.70

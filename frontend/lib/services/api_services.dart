@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String BASE_URL = 'http://10.148.247.90:8000';
+  static const String BASE_URL = 'http://10.79.144.90:8000';
 
   /// Get prediction from backend with audio file
   /// Audio should be WAV file bytes (mono, 16kHz, 5 seconds)
