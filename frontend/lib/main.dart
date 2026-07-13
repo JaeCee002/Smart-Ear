@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
-import 'services/api_services.dart';
 import 'services/audio_service.dart';
+import 'services/edge_ai_service.dart';
 
 void main() {
   runApp(const SmartEarApp());
@@ -39,6 +39,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   late AnimationController _recordingController;
 
   final AudioService _audioService = AudioService();
+  final EdgeAiService _edgeAiService = EdgeAiService();
   String detectedSound = "Listening...";
   double confidence = 0.0;
   bool isRecording = false;
@@ -73,6 +74,15 @@ class _DashboardScreenState extends State<DashboardScreen>
       setState(() {
         errorMessage = "Microphone permission denied";
       });
+      return;
+    }
+    try {
+      await _edgeAiService.initialize();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        errorMessage = "Could not load the on-device sound model: $error";
+      });
     }
   }
 
@@ -82,6 +92,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     // _pulseController.dispose();
     _recordingController.dispose();
     _audioService.dispose();
+    _edgeAiService.dispose();
     super.dispose();
   }
 
@@ -141,7 +152,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       // Send audio to backend
       print("📤 Sending audio to backend for prediction...");
-      final result = await ApiService.getPredictionWithAudio(audioBytes);
+      final result = await _edgeAiService.predict(audioBytes);
 
       setState(() {
         isProcessing = false;
@@ -389,7 +400,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: _buildFlaticonIcon(
                 'assets/icons/Icons/alarm.png',
                 color: const Color(0xFFFF5252),
-                size: 30,
+                size: 120,
                 fallback: Icons.warning_amber,
               ),
             )
@@ -398,7 +409,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: _buildFlaticonIcon(
                 'assets/icons/Icons/baby.png',
                 color: const Color.fromARGB(143, 255, 82, 82),
-                size: 30,
+                size: 120,
                 fallback: Icons.baby_changing_station,
               ),
             )
@@ -407,7 +418,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: _buildFlaticonIcon(
                 'assets/icons/Icons/door.png',
                 color: const Color(0xFF00E5FF),
-                size: 30,
+                size: 120,
                 fallback: Icons.door_back_door,
               ),
             )
@@ -416,7 +427,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: _buildFlaticonIcon(
                 'assets/icons/Icons/broken-glass.png',
                 color: const Color(0xFFFFD54F),
-                size: 30,
+                size: 120,
                 fallback: Icons.wine_bar,
               ),
             ),
@@ -444,8 +455,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         imagePath,
         width: size,
         height: size,
-        color: color,
-        colorBlendMode: BlendMode.srcIn,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
         errorBuilder: fallbackIcon,
       );
     }
@@ -454,8 +465,8 @@ class _DashboardScreenState extends State<DashboardScreen>
       imagePath,
       width: size,
       height: size,
-      color: color,
-      colorBlendMode: BlendMode.srcIn,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
       errorBuilder: fallbackIcon,
     );
   }
@@ -683,34 +694,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           Icon(Icons.settings_outlined, color: Colors.white24),
         ],
       ),
-    );
-  }
-}
-
-class _RadarPulseRing extends StatelessWidget {
-  final Animation<double> animation;
-  const _RadarPulseRing({required this.animation});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, child) {
-        return Opacity(
-          opacity: (1.0 - animation.value),
-          child: Container(
-            width: 280 * animation.value,
-            height: 280 * animation.value,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: const Color(0xFF00E5FF).withOpacity(0.3),
-                width: 2,
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }
