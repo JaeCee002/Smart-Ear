@@ -3,7 +3,13 @@ import 'dart:typed_data';
 
 import 'package:tflite_flutter/tflite_flutter.dart';
 
-class EdgeAiService {
+abstract class SoundInferenceService {
+  Future<void> initialize();
+  Future<Map<String, dynamic>> predict(List<int> wavBytes);
+  void dispose();
+}
+
+class EdgeAiService implements SoundInferenceService {
   static const int sampleRate = 16000;
   static const int melBands = 64;
   static const int targetFrames = 128;
@@ -19,6 +25,7 @@ class EdgeAiService {
 
   Interpreter? _interpreter;
 
+  @override
   Future<void> initialize() async {
     if (_interpreter != null) return;
     _interpreter = await Interpreter.fromAsset(
@@ -37,6 +44,7 @@ class EdgeAiService {
     }
   }
 
+  @override
   Future<Map<String, dynamic>> predict(List<int> wavBytes) async {
     await initialize();
     final samples = WavDecoder.decodeMono16k(wavBytes);
@@ -74,6 +82,7 @@ class EdgeAiService {
     };
   }
 
+  @override
   void dispose() {
     _interpreter?.close();
     _interpreter = null;

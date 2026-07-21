@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smartear_flutter/services/edge_ai_service.dart';
+import 'package:smartear_flutter/services/audio_service.dart';
+import 'package:smartear_flutter/services/yamnet_edge_ai_service.dart';
 
 void main() {
   test('decodes mono 16-bit PCM WAV samples', () {
@@ -23,6 +25,17 @@ void main() {
     );
   });
 
+  test('wraps streamed PCM16 bytes in a valid WAV container', () {
+    final pcm = Uint8List.fromList([0x00, 0x80, 0x00, 0x00, 0xFF, 0x7F]);
+    final wav = AudioService.pcm16ToWav(pcm);
+    final samples = WavDecoder.decodeMono16k(wav);
+
+    expect(samples, hasLength(3));
+    expect(samples.first, closeTo(-1, 0.0001));
+    expect(samples[1], 0);
+    expect(samples.last, closeTo(1, 0.0001));
+  });
+
   test('creates the model-required finite Mel tensor', () {
     final samples = Float32List(EdgeAiService.sampleRate * 5);
     for (var i = 0; i < samples.length; i++) {
@@ -37,6 +50,32 @@ void main() {
       expect(band.every((value) => value.isFinite), isTrue);
       expect(band.every((value) => value <= 0 && value >= -80.001), isTrue);
     }
+  });
+
+  test('calculates dynamic YAMNet output frame counts', () {
+    expect(YamnetEdgeAiService.frameCountForTest(15360), 1);
+    expect(YamnetEdgeAiService.frameCountForTest(16000), 2);
+    expect(YamnetEdgeAiService.frameCountForTest(78080), 10);
+    expect(YamnetEdgeAiService.frameCountForTest(80000), 10);
+  });
+
+  test('allocates dynamic YAMNet output shapes', () {
+    expect(YamnetEdgeAiService.outputShapeForTest([1, 521], 69120), [8, 521]);
+    expect(YamnetEdgeAiService.outputShapeForTest([1, 1024], 69120), [8, 1024]);
+    expect(YamnetEdgeAiService.outputShapeForTest([1, 64], 69120), [432, 64]);
+    expect(YamnetEdgeAiService.outputShapeForTest([1, 64], 80000), [528, 64]);
+  });
+
+  test('normalizes recordings to a fixed five-second YAMNet input', () {
+    final short = YamnetEdgeAiService.normalizeInputForTest([0.25, -0.5]);
+    expect(short, hasLength(80000));
+    expect(short.take(3), [0.25, -0.5, 0.0]);
+
+    final long = YamnetEdgeAiService.normalizeInputForTest(
+      List<double>.filled(80001, 0.75),
+    );
+    expect(long, hasLength(80000));
+    expect(long.last, 0.75);
   });
 }
 

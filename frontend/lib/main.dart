@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'services/audio_service.dart';
 import 'services/edge_ai_service.dart';
+import 'services/yamnet_edge_ai_service.dart';
 
 void main() {
   runApp(const SmartEarApp());
@@ -39,11 +42,25 @@ class _DashboardScreenState extends State<DashboardScreen>
   late AnimationController _recordingController;
 
   final AudioService _audioService = AudioService();
-  final EdgeAiService _edgeAiService = EdgeAiService();
+  static const String _aiEngine = String.fromEnvironment(
+    'SMART_EAR_AI_ENGINE',
+    defaultValue: 'legacy',
+  );
+  final SoundInferenceService _edgeAiService = _aiEngine == 'yamnet'
+      ? YamnetEdgeAiService()
+      : EdgeAiService();
   String detectedSound = "Listening...";
   double confidence = 0.0;
   bool isRecording = false;
   bool isProcessing = false;
+  bool _isStartingListening = false;
+  StreamSubscription<Uint8List>? _audioSubscription;
+  final List<int> _rollingPcm = [];
+  int _bytesSincePrediction = 0;
+  static const int _pcmBytesPerSecond = AudioService.sampleRate * 2;
+  static const int _windowBytes =
+      AudioService.durationSeconds * _pcmBytesPerSecond;
+  static const int _predictionHopBytes = 2 * _pcmBytesPerSecond;
   int recordingCountdown = 5;
   String errorMessage = "";
 
@@ -88,6 +105,8 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   void dispose() {
+    _audioSubscription?.cancel();
+    _audioService.stopPcmStream();
     _arrowController.dispose();
     // _pulseController.dispose();
     _recordingController.dispose();
@@ -150,8 +169,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         detectedSound = "Processing...";
       });
 
-      // Send audio to backend
-      print("📤 Sending audio to backend for prediction...");
+      print("Running $_aiEngine on-device prediction...");
       final result = await _edgeAiService.predict(audioBytes);
 
       setState(() {
@@ -166,8 +184,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       // Animate arrow based on detected sound
       _animateArrowForSound(detectedSound);
-    } catch (e) {
+    } catch (e, stackTrace) {
       print("❌ Error: $e");
+      print(stackTrace);
       setState(() {
         isRecording = false;
         isProcessing = false;
@@ -176,6 +195,135 @@ class _DashboardScreenState extends State<DashboardScreen>
         confidence = 0.0;
       });
     }
+  }
+
+  Future<void> toggleContinuousListening() async {
+    if (_isStartingListening) return;
+    if (isRecording) {
+      await _stopContinuousListening();
+      return;
+    }
+    if (!(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+      setState(() {
+        errorMessage =
+            "Microphone recording is not supported on this platform.";
+        detectedSound = "Error";
+      });
+      return;
+    }
+
+    _isStartingListening = true;
+    try {
+      final stream = await _audioService.startPcmStream();
+      _rollingPcm.clear();
+      _bytesSincePrediction = 0;
+      await _audioSubscription?.cancel();
+      _audioSubscription = stream.listen(
+        _handlePcmChunk,
+        onError: _handleStreamError,
+        onDone: _handleStreamDone,
+        cancelOnError: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        isRecording = true;
+        isProcessing = false;
+        errorMessage = "";
+        detectedSound = "Listening...";
+        confidence = 0.0;
+      });
+    } catch (error, stackTrace) {
+      print("Could not start continuous listening: $error");
+      print(stackTrace);
+      if (!mounted) return;
+      setState(() {
+        isRecording = false;
+        isProcessing = false;
+        errorMessage = error.toString();
+        detectedSound = "Error";
+      });
+    } finally {
+      _isStartingListening = false;
+    }
+  }
+
+  void _handlePcmChunk(Uint8List chunk) {
+    if (!isRecording || chunk.isEmpty) return;
+    _rollingPcm.addAll(chunk);
+    _bytesSincePrediction += chunk.length;
+    if (_rollingPcm.length > _windowBytes) {
+      _rollingPcm.removeRange(0, _rollingPcm.length - _windowBytes);
+    }
+    if (_rollingPcm.length == _windowBytes &&
+        _bytesSincePrediction >= _predictionHopBytes &&
+        !isProcessing) {
+      _bytesSincePrediction = 0;
+      _predictContinuousWindow(List<int>.from(_rollingPcm));
+    }
+  }
+
+  Future<void> _predictContinuousWindow(List<int> pcmWindow) async {
+    if (!mounted || !isRecording || isProcessing) return;
+    setState(() => isProcessing = true);
+    try {
+      final result = await _edgeAiService.predict(
+        AudioService.pcm16ToWav(pcmWindow),
+      );
+      if (!mounted || !isRecording) return;
+      final label = result["label"] ?? "Unknown";
+      final score = (result["confidence"] ?? 0.0).toDouble();
+      setState(() {
+        detectedSound = label;
+        confidence = score;
+        errorMessage = "";
+      });
+      _animateArrowForSound(label);
+      print(
+        "Continuous prediction: $label "
+        "(${(score * 100).toStringAsFixed(1)}%)",
+      );
+    } catch (error, stackTrace) {
+      print("Continuous inference error: $error");
+      print(stackTrace);
+      if (mounted) setState(() => errorMessage = error.toString());
+    } finally {
+      if (mounted) setState(() => isProcessing = false);
+    }
+  }
+
+  Future<void> _stopContinuousListening() async {
+    if (mounted) {
+      setState(() {
+        isRecording = false;
+        isProcessing = false;
+        detectedSound = "Listening stopped";
+      });
+    }
+    await _audioSubscription?.cancel();
+    _audioSubscription = null;
+    await _audioService.stopPcmStream();
+    _rollingPcm.clear();
+    _bytesSincePrediction = 0;
+  }
+
+  void _handleStreamError(Object error, StackTrace stackTrace) {
+    print("Audio stream error: $error");
+    if (!mounted) return;
+    setState(() {
+      isRecording = false;
+      isProcessing = false;
+      errorMessage = error.toString();
+      detectedSound = "Error";
+    });
+  }
+
+  void _handleStreamDone() {
+    if (!mounted || !isRecording) return;
+    setState(() {
+      isRecording = false;
+      isProcessing = false;
+      detectedSound = "Listening stopped";
+    });
   }
 
   /// Animate arrow direction based on detected sound
@@ -188,9 +336,11 @@ class _DashboardScreenState extends State<DashboardScreen>
         direction = 0.0; // North
         break;
       case "crying_baby":
+      case "baby_crying":
         direction = 0.25; // East
         break;
       case "door_wood_knock":
+      case "door_knocking":
         direction = 0.5; // South
         break;
       case "glass_breaking":
@@ -404,7 +554,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 fallback: Icons.warning_amber,
               ),
             )
-          else if (detectedSound == "crying_baby")
+          else if (detectedSound == "crying_baby" ||
+              detectedSound == "baby_crying")
             Center(
               child: _buildFlaticonIcon(
                 'assets/icons/Icons/baby.png',
@@ -413,7 +564,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 fallback: Icons.baby_changing_station,
               ),
             )
-          else if (detectedSound == "door_wood_knock")
+          else if (detectedSound == "door_wood_knock" ||
+              detectedSound == "door_knocking")
             Center(
               child: _buildFlaticonIcon(
                 'assets/icons/Icons/door.png',
@@ -429,6 +581,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                 color: const Color(0xFFFFD54F),
                 size: 120,
                 fallback: Icons.wine_bar,
+              ),
+            )
+          else if (detectedSound == "car_horn")
+            const Center(
+              child: Icon(
+                Icons.directions_car,
+                color: Color(0xFFFFD54F),
+                size: 80,
               ),
             ),
         ],
@@ -495,7 +655,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ],
           ),
           child: ElevatedButton(
-            onPressed: (isRecording || isProcessing) ? null : recordAndPredict,
+            onPressed: _isStartingListening ? null : toggleContinuousListening,
             style: ElevatedButton.styleFrom(
               shape: const CircleBorder(),
               padding: EdgeInsets.zero,
@@ -504,13 +664,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   : const Color(0xFF00E5FF),
             ),
             child: isRecording
-                ? Text(
-                    '$recordingCountdown',
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )
+                ? const Icon(Icons.stop, color: Colors.black, size: 40)
                 : isProcessing
                 ? const Text(
                     'Processing...',

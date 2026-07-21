@@ -1,0 +1,24 @@
+{
+  "version": "2.0.0-local-candidate",
+  "model_type": "yamnet_embedding_head",
+  "embedding_size": 1024,
+  "sample_rate": 16000,
+  "labels": [
+    "siren",
+    "car_horn",
+    "glass_breaking",
+    "baby_crying",
+    "door_knocking"
+  ],
+  "thresholds": {
+    "siren": 0.9074786901473999,
+    "car_horn": 0.9687392115592957,
+    "glass_breaking": 0.5721836090087891,
+    "baby_crying": 0.9986559748649597,
+    "door_knocking": 0.7350537180900574
+  },
+  "training_sources": [
+    "esc50",
+    "urbansound8k"
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "labels": [
+    "siren",
+    "car_horn",
+    "glass_breaking",
+    "baby_crying",
+    "door_knocking"
+  ],
+  "source_mappings": {
+    "esc50": {
+      "siren": "siren",
+      "car_horn": "car_horn",
+      "glass_breaking": "glass_breaking",
+      "crying_baby": "baby_crying",
+      "door_wood_knock": "door_knocking"
+    },
+    "urbansound8k": {
+      "siren": "siren",
+      "car_horn": "car_horn"
+    }
+  },
+  "background_classes": {
+    "esc50": [
+      "clapping",
+      "fireworks",
+      "engine",
+      "vacuum_cleaner",
+      "children_playing",
+      "laughing",
+      "clock_alarm",
+      "dog",
+      "rain",
+      "wind"
+    ],
+    "urbansound8k": [
+      "air_conditioner",
+      "children_playing",
+      "dog_bark",
+      "drilling",
+      "engine_idling",
+      "jackhammer",
+      "street_music"
+    ]
+  },
+  "splits": {
+    "esc50": {
+      "train": [1, 2, 3],
+      "validation": [4],
+      "test": [5]
+    },
+    "urbansound8k": {
+      "train": [1, 2, 3, 4, 5, 6, 7],
+      "validation": [8],
+      "test": [9, 10]
+    }
+  }
+}

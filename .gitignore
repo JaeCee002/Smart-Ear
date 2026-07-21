@@ -20,6 +20,13 @@ __pycache__/
 
 # ESC-50 Dataset
 backend/ESC-50-master/
+backend/audio_training/datasets/
+backend/audio_training/cache/
+backend/audio_training/outputs/
+backend/audio_training/manifests/*.csv
+backend/audio_training/datasets/
+backend/audio_training/cache/
+backend/audio_training/outputs/
 
 # Trained Models
 backend/model/

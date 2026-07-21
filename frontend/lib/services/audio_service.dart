@@ -1,6 +1,7 @@
 import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
+import 'dart:typed_data';
 import 'dart:io';
 
 class AudioService {
@@ -80,6 +81,51 @@ class AudioService {
       print("❌ Error starting recording: $e");
       return null;
     }
+  }
+
+  Future<Stream<Uint8List>> startPcmStream() async {
+    if (!isSupportedPlatform) {
+      throw UnsupportedError("Recording is not supported on this platform.");
+    }
+    if (!await _audioRecorder.hasPermission()) {
+      throw Exception("Microphone permission denied");
+    }
+    return _audioRecorder.startStream(
+      const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: sampleRate,
+        numChannels: channels,
+      ),
+    );
+  }
+
+  Future<void> stopPcmStream() async {
+    await _audioRecorder.stop();
+  }
+
+  static Uint8List pcm16ToWav(List<int> pcmBytes) {
+    final wav = Uint8List(44 + pcmBytes.length);
+    final data = ByteData.sublistView(wav);
+
+    void writeAscii(int offset, String value) {
+      wav.setRange(offset, offset + value.length, value.codeUnits);
+    }
+
+    writeAscii(0, 'RIFF');
+    data.setUint32(4, wav.length - 8, Endian.little);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    data.setUint32(16, 16, Endian.little);
+    data.setUint16(20, 1, Endian.little);
+    data.setUint16(22, channels, Endian.little);
+    data.setUint32(24, sampleRate, Endian.little);
+    data.setUint32(28, sampleRate * channels * 2, Endian.little);
+    data.setUint16(32, channels * 2, Endian.little);
+    data.setUint16(34, 16, Endian.little);
+    writeAscii(36, 'data');
+    data.setUint32(40, pcmBytes.length, Endian.little);
+    wav.setRange(44, wav.length, pcmBytes);
+    return wav;
   }
 
   /// Stop recording and return WAV bytes
