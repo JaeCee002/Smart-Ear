@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'services/audio_service.dart';
+import 'services/alert_history_service.dart';
+import 'services/app_preferences.dart';
 import 'services/edge_ai_service.dart';
+import 'services/prediction_smoother.dart';
 import 'services/yamnet_edge_ai_service.dart';
+import 'screens/history_screen.dart';
+import 'screens/settings_screen.dart';
 
 void main() {
   runApp(const SmartEarApp());
@@ -37,14 +42,23 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
-  late AnimationController _arrowController;
+  static const MethodChannel _alertChannel = MethodChannel(
+    'com.example.smartear_flutter/alerts',
+  );
+  _DashboardMode _dashboardMode = _DashboardMode.soundAlerts;
   //late AnimationController _pulseController;
   late AnimationController _recordingController;
 
   final AudioService _audioService = AudioService();
+  final AppPreferencesStore _preferencesStore = AppPreferencesStore();
+  final AlertHistoryService _historyService = AlertHistoryService();
+  final PredictionSmoother _predictionSmoother = PredictionSmoother(
+    windowSize: 4,
+    requiredVotes: 2,
+  );
   static const String _aiEngine = String.fromEnvironment(
     'SMART_EAR_AI_ENGINE',
-    defaultValue: 'legacy',
+    defaultValue: 'yamnet',
   );
   final SoundInferenceService _edgeAiService = _aiEngine == 'yamnet'
       ? YamnetEdgeAiService()
@@ -57,21 +71,21 @@ class _DashboardScreenState extends State<DashboardScreen>
   StreamSubscription<Uint8List>? _audioSubscription;
   final List<int> _rollingPcm = [];
   int _bytesSincePrediction = 0;
-  static const int _pcmBytesPerSecond = AudioService.sampleRate * 2;
-  static const int _windowBytes =
-      AudioService.durationSeconds * _pcmBytesPerSecond;
-  static const int _predictionHopBytes = 2 * _pcmBytesPerSecond;
+  DateTime _ignoreAudioUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _alertDismissTimer;
+  static const int _pcmBytesPerSample = 2;
+  int get _pcmBytesPerSecond => AudioService.sampleRate * _pcmBytesPerSample;
+  int get _windowBytes => AudioService.durationSeconds * _pcmBytesPerSecond;
+  int get _predictionHopBytes => 2 * _pcmBytesPerSecond;
   int recordingCountdown = 5;
   String errorMessage = "";
+  _SoundAlert? _activeAlert;
+  AppPreferences _preferences = const AppPreferences();
+  List<AlertHistoryEntry> _alertHistory = const [];
 
   @override
   void initState() {
     super.initState();
-    _arrowController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    );
-
     // _pulseController = AnimationController(
     //   vsync: this,
     //   duration: const Duration(seconds: 3),
@@ -83,11 +97,53 @@ class _DashboardScreenState extends State<DashboardScreen>
     )..repeat(reverse: true);
 
     _requestPermissionsAndInit();
+    _loadSavedState();
+  }
+
+  Future<void> _loadSavedState() async {
+    final results = await Future.wait<dynamic>([
+      _preferencesStore.load(),
+      _historyService.load(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _preferences = results[0] as AppPreferences;
+      _alertHistory = results[1] as List<AlertHistoryEntry>;
+    });
+  }
+
+  Future<void> _updatePreferences(AppPreferences preferences) async {
+    setState(() => _preferences = preferences);
+    await _preferencesStore.save(preferences);
+    if (preferences.flashEnabled && Platform.isAndroid) {
+      await _audioService.requestCameraPermission();
+    }
+  }
+
+  Future<void> _clearHistory() async {
+    await _historyService.clear();
+    if (mounted) setState(() => _alertHistory = const []);
+  }
+
+  Future<void> _setDashboardMode(_DashboardMode mode) async {
+    if (_dashboardMode == mode) return;
+    if (_dashboardMode == _DashboardMode.soundAlerts && isRecording) {
+      await _stopContinuousListening();
+    }
+    if (!mounted) return;
+    if (mode != _DashboardMode.soundAlerts) {
+      _dismissAlert();
+    }
+    setState(() {
+      _dashboardMode = mode;
+    });
   }
 
   Future<void> _requestPermissionsAndInit() async {
+    print("Smart Ear inference engine: $_aiEngine");
     final granted = await _audioService.requestMicrophonePermission();
     if (!granted) {
+      if (!mounted) return;
       setState(() {
         errorMessage = "Microphone permission denied";
       });
@@ -95,6 +151,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
     try {
       await _edgeAiService.initialize();
+      await _audioService.requestCameraPermission();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -105,9 +162,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   void dispose() {
+    _alertDismissTimer?.cancel();
     _audioSubscription?.cancel();
     _audioService.stopPcmStream();
-    _arrowController.dispose();
     // _pulseController.dispose();
     _recordingController.dispose();
     _audioService.dispose();
@@ -181,9 +238,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       print(
         "✅ Prediction: $detectedSound (${(confidence * 100).toStringAsFixed(1)}%)",
       );
-
-      // Animate arrow based on detected sound
-      _animateArrowForSound(detectedSound);
     } catch (e, stackTrace) {
       print("❌ Error: $e");
       print(stackTrace);
@@ -214,9 +268,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     _isStartingListening = true;
     try {
-      final stream = await _audioService.startPcmStream();
+      final stream = await _audioService.startPcmStream(channels: 1);
       _rollingPcm.clear();
       _bytesSincePrediction = 0;
+      _ignoreAudioUntil = DateTime.fromMillisecondsSinceEpoch(0);
+      _predictionSmoother.reset();
       await _audioSubscription?.cancel();
       _audioSubscription = stream.listen(
         _handlePcmChunk,
@@ -249,6 +305,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _handlePcmChunk(Uint8List chunk) {
     if (!isRecording || chunk.isEmpty) return;
+    if (DateTime.now().isBefore(_ignoreAudioUntil)) {
+      _rollingPcm.clear();
+      _bytesSincePrediction = 0;
+      return;
+    }
     _rollingPcm.addAll(chunk);
     _bytesSincePrediction += chunk.length;
     if (_rollingPcm.length > _windowBytes) {
@@ -272,14 +333,26 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (!mounted || !isRecording) return;
       final label = result["label"] ?? "Unknown";
       final score = (result["confidence"] ?? 0.0).toDouble();
+      final normalizedLabel = label.toString().toLowerCase();
+      final accepted =
+          _preferences.enabledLabels.contains(normalizedLabel) &&
+          score >= _preferences.minimumConfidence;
+      final decision = _predictionSmoother.update(
+        accepted ? normalizedLabel : 'unknown',
+        accepted ? score : 0.0,
+      );
+      if (!decision.shouldUpdate) {
+        if (mounted) setState(() => confidence = score);
+        return;
+      }
       setState(() {
-        detectedSound = label;
+        detectedSound = decision.label;
         confidence = score;
         errorMessage = "";
       });
-      _animateArrowForSound(label);
+      _showCriticalAlert(decision.label, score);
       print(
-        "Continuous prediction: $label "
+        "Continuous $_aiEngine prediction: $label "
         "(${(score * 100).toStringAsFixed(1)}%)",
       );
     } catch (error, stackTrace) {
@@ -289,6 +362,66 @@ class _DashboardScreenState extends State<DashboardScreen>
     } finally {
       if (mounted) setState(() => isProcessing = false);
     }
+  }
+
+  void _showCriticalAlert(String label, double score) {
+    final alert = _SoundAlert.fromPrediction(label, score);
+    if (!mounted) return;
+    if (alert == null) {
+      _dismissAlert();
+      return;
+    }
+
+    // Exclude the phone's own vibration from subsequent inference windows.
+    _ignoreAudioUntil = DateTime.now().add(const Duration(seconds: 2));
+    _rollingPcm.clear();
+    _bytesSincePrediction = 0;
+    _alertDismissTimer?.cancel();
+    _alertDismissTimer = Timer(
+      Duration(seconds: _preferences.alertDurationSeconds),
+      _dismissAlert,
+    );
+    setState(() => _activeAlert = alert);
+    _recordAlert(label, alert);
+    _triggerNativeAlert(alert);
+  }
+
+  Future<void> _recordAlert(String label, _SoundAlert alert) async {
+    try {
+      final entries = await _historyService.add(
+        AlertHistoryEntry(
+          label: label,
+          displayName: alert.displayName,
+          confidence: alert.confidence,
+          urgency: alert.urgency.name,
+          detectedAt: DateTime.now(),
+        ),
+      );
+      if (mounted) setState(() => _alertHistory = entries);
+    } catch (error) {
+      debugPrint('Could not save alert history: $error');
+    }
+  }
+
+  Future<void> _triggerNativeAlert(_SoundAlert alert) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _alertChannel.invokeMethod<void>('triggerAlert', {
+        'urgency': alert.urgency.name,
+        'vibrationEnabled': _preferences.vibrationEnabled,
+        'flashEnabled': _preferences.flashEnabled,
+      });
+    } on PlatformException catch (error) {
+      print("Native alert effect failed: ${error.message}");
+    } on MissingPluginException {
+      print("Native alert effects are unavailable on this platform.");
+    }
+  }
+
+  void _dismissAlert() {
+    _alertDismissTimer?.cancel();
+    _alertDismissTimer = null;
+    if (mounted && _activeAlert != null) setState(() => _activeAlert = null);
   }
 
   Future<void> _stopContinuousListening() async {
@@ -326,37 +459,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
-  /// Animate arrow direction based on detected sound
-  void _animateArrowForSound(String sound) {
-    // Map sounds to directions (0.0 = North, 0.25 = East, 0.5 = South, 0.75 = West)
-    double direction = 0.0;
-
-    switch (sound.toLowerCase()) {
-      case "siren":
-        direction = 0.0; // North
-        break;
-      case "crying_baby":
-      case "baby_crying":
-        direction = 0.25; // East
-        break;
-      case "door_wood_knock":
-      case "door_knocking":
-        direction = 0.5; // South
-        break;
-      case "glass_breaking":
-        direction = 0.75; // West
-        break;
-      default:
-        direction = 0.125; // North-East (default)
-    }
-
-    _arrowController.animateTo(
-      direction,
-      duration: const Duration(milliseconds: 800),
-      curve: Curves.easeInOut,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -372,26 +474,152 @@ class _DashboardScreenState extends State<DashboardScreen>
             color: Color(0xFF00E5FF),
           ),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.grid_view_rounded, color: Colors.white54),
-            onPressed: () {},
+      ),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            child: Column(
+              children: [
+                const SizedBox(height: 20),
+                if (_dashboardMode == _DashboardMode.soundAlerts) ...[
+                  Center(child: _buildRadarDisplay()),
+                  const SizedBox(height: 20),
+                  _buildMetricsSection(),
+                  _recordButton(),
+                ] else if (_dashboardMode == _DashboardMode.history) ...[
+                  SizedBox(
+                    height: MediaQuery.sizeOf(context).height - 150,
+                    child: HistoryScreen(
+                      entries: _alertHistory,
+                      onClear: _clearHistory,
+                    ),
+                  ),
+                ] else ...[
+                  SizedBox(
+                    height: MediaQuery.sizeOf(context).height - 150,
+                    child: SettingsScreen(
+                      preferences: _preferences,
+                      onChanged: _updatePreferences,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(width: 8),
+          if (_activeAlert != null)
+            Positioned.fill(child: _buildFullScreenAlert(_activeAlert!)),
         ],
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            const SizedBox(height: 20),
-            Center(child: _buildRadarDisplay()),
-            const SizedBox(height: 20),
-            _buildMetricsSection(),
-            _recordButton(),
-          ],
+      bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
+  Widget _buildFullScreenAlert(_SoundAlert alert) {
+    return Material(
+      color: alert.color.withValues(alpha: 0.97),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${alert.urgency.displayName.toUpperCase()} PRIORITY',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Dismiss alert',
+                    onPressed: _dismissAlert,
+                    icon: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 32,
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Container(
+                width: 180,
+                height: 180,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 32,
+                      spreadRadius: 8,
+                    ),
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: alert.iconPath == null
+                    ? Icon(alert.fallbackIcon, color: alert.color, size: 100)
+                    : _buildFlaticonIcon(
+                        alert.iconPath!,
+                        color: alert.color,
+                        size: 110,
+                        fallback: alert.fallbackIcon,
+                      ),
+              ),
+              const SizedBox(height: 36),
+              const Text(
+                'CRITICAL SOUND DETECTED',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                alert.displayName.toUpperCase(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 36,
+                  height: 1.05,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '${(alert.confidence * 100).toStringAsFixed(1)}% confidence',
+                style: const TextStyle(color: Colors.white, fontSize: 18),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: double.infinity,
+                height: 58,
+                child: FilledButton(
+                  onPressed: _dismissAlert,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: alert.color,
+                  ),
+                  child: const Text(
+                    'DISMISS',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      bottomNavigationBar: _buildBottomNav(),
     );
   }
 
@@ -413,33 +641,17 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
             ),
 
-          // DIRECTIONS
+          // This is an activity display, not a sound-direction indicator.
           const Positioned(
             top: 6,
             child: Text(
-              'N',
-              style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
-            ),
-          ),
-          const Positioned(
-            bottom: 6,
-            child: Text(
-              'S',
-              style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
-            ),
-          ),
-          const Positioned(
-            left: 6,
-            child: Text(
-              'W',
-              style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
-            ),
-          ),
-          const Positioned(
-            right: 6,
-            child: Text(
-              'E',
-              style: TextStyle(color: Color(0xFFBAC9CD), fontSize: 10),
+              'SOUND MONITOR',
+              style: TextStyle(
+                color: Color(0xFFBAC9CD),
+                fontSize: 11,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
 
@@ -590,6 +802,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                 color: Color(0xFFFFD54F),
                 size: 80,
               ),
+            )
+          else
+            Center(
+              child: Icon(
+                isRecording ? Icons.graphic_eq : Icons.hearing,
+                color: isRecording ? const Color(0xFF00E5FF) : Colors.white24,
+                size: 88,
+              ),
             ),
         ],
       ),
@@ -702,15 +922,28 @@ class _DashboardScreenState extends State<DashboardScreen>
           const SizedBox(height: 15),
           if (errorMessage.isNotEmpty)
             Container(
-              padding: const EdgeInsets.all(2),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: const Color(0xFFFF5252).withOpacity(0.2),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFFFF5252)),
               ),
-              child: Text(
-                errorMessage,
-                style: const TextStyle(color: Color(0xFFFF5252), fontSize: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      errorMessage,
+                      style: const TextStyle(
+                        color: Color(0xFFFF8A80),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _requestPermissionsAndInit,
+                    child: const Text('Retry'),
+                  ),
+                ],
               ),
             ),
           const SizedBox(height: 16),
@@ -812,8 +1045,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                   'Confidence: ${(confidence * 100).toStringAsFixed(1)}%',
                   style: const TextStyle(color: Colors.white54, fontSize: 12),
                 ),
-                const Text(
-                  "Status: Live Monitoring",
+                Text(
+                  isRecording
+                      ? "Status: Live monitoring"
+                      : "Status: Monitoring stopped",
                   style: TextStyle(color: Colors.white54, fontSize: 12),
                 ),
               ],
@@ -840,14 +1075,123 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
         ],
       ),
-      child: const Row(
+      child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          Icon(Icons.radar, color: Color(0xFF00E5FF)),
-          Icon(Icons.history, color: Colors.white24),
-          Icon(Icons.settings_outlined, color: Colors.white24),
+          IconButton(
+            tooltip: 'Sound alerts',
+            onPressed: () => _setDashboardMode(_DashboardMode.soundAlerts),
+            icon: Icon(
+              Icons.radar,
+              color: _dashboardMode == _DashboardMode.soundAlerts
+                  ? const Color(0xFF00E5FF)
+                  : Colors.white24,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Alert history',
+            onPressed: () => _setDashboardMode(_DashboardMode.history),
+            icon: Icon(
+              Icons.history,
+              color: _dashboardMode == _DashboardMode.history
+                  ? const Color(0xFF00E5FF)
+                  : Colors.white24,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: () => _setDashboardMode(_DashboardMode.settings),
+            icon: Icon(
+              Icons.settings_outlined,
+              color: _dashboardMode == _DashboardMode.settings
+                  ? const Color(0xFF00E5FF)
+                  : Colors.white24,
+            ),
+          ),
         ],
       ),
     );
+  }
+}
+
+enum _DashboardMode { soundAlerts, history, settings }
+
+enum _AlertUrgency {
+  high('High'),
+  medium('Medium'),
+  low('Low');
+
+  const _AlertUrgency(this.displayName);
+  final String displayName;
+}
+
+class _SoundAlert {
+  const _SoundAlert({
+    required this.displayName,
+    required this.confidence,
+    required this.urgency,
+    required this.color,
+    required this.fallbackIcon,
+    this.iconPath,
+  });
+
+  final String displayName;
+  final double confidence;
+  final _AlertUrgency urgency;
+  final Color color;
+  final IconData fallbackIcon;
+  final String? iconPath;
+
+  static _SoundAlert? fromPrediction(String label, double confidence) {
+    switch (label.toLowerCase()) {
+      case 'siren':
+        return _SoundAlert(
+          displayName: 'Emergency Siren',
+          confidence: confidence,
+          urgency: _AlertUrgency.high,
+          color: const Color(0xFFD32F2F),
+          fallbackIcon: Icons.warning_amber_rounded,
+          iconPath: 'assets/icons/Icons/alarm.png',
+        );
+      case 'glass_breaking':
+        return _SoundAlert(
+          displayName: 'Glass Breaking',
+          confidence: confidence,
+          urgency: _AlertUrgency.high,
+          color: const Color(0xFFD32F2F),
+          fallbackIcon: Icons.broken_image_rounded,
+          iconPath: 'assets/icons/Icons/broken-glass.png',
+        );
+      case 'car_horn':
+        return _SoundAlert(
+          displayName: 'Car Horn',
+          confidence: confidence,
+          urgency: _AlertUrgency.high,
+          color: const Color(0xFFD32F2F),
+          fallbackIcon: Icons.directions_car_rounded,
+        );
+      case 'baby_crying':
+      case 'crying_baby':
+        return _SoundAlert(
+          displayName: 'Baby Crying',
+          confidence: confidence,
+          urgency: _AlertUrgency.medium,
+          color: const Color(0xFFF57C00),
+          fallbackIcon: Icons.baby_changing_station,
+          iconPath: 'assets/icons/Icons/baby.png',
+        );
+      case 'door_knocking':
+      case 'door_wood_knock':
+        return _SoundAlert(
+          displayName: 'Door Knocking',
+          confidence: confidence,
+          urgency: _AlertUrgency.low,
+          color: const Color(0xFF00838F),
+          fallbackIcon: Icons.door_front_door_rounded,
+          iconPath: 'assets/icons/Icons/door.png',
+        );
+      default:
+        return null;
+    }
   }
 }

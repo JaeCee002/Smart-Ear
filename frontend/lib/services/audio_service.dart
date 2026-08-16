@@ -33,6 +33,13 @@ class AudioService {
     return status.isGranted;
   }
 
+  /// Camera permission is optional and is only used for torch alerts.
+  Future<bool> requestCameraPermission() async {
+    if (!Platform.isAndroid) return false;
+    final status = await Permission.camera.request();
+    return status.isGranted;
+  }
+
   /// Check if recording is supported
   Future<bool> isRecordingSupported() async {
     try {
@@ -83,7 +90,7 @@ class AudioService {
     }
   }
 
-  Future<Stream<Uint8List>> startPcmStream() async {
+  Future<Stream<Uint8List>> startPcmStream({int channels = 1}) async {
     if (!isSupportedPlatform) {
       throw UnsupportedError("Recording is not supported on this platform.");
     }
@@ -91,7 +98,7 @@ class AudioService {
       throw Exception("Microphone permission denied");
     }
     return _audioRecorder.startStream(
-      const RecordConfig(
+      RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: sampleRate,
         numChannels: channels,

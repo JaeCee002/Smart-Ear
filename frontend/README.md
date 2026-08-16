@@ -1,17 +1,52 @@
-# smartear_flutter
+# Smart Ear mobile app
 
-A new Flutter project.
+Smart Ear is an offline Flutter application that detects important environmental
+sounds and presents strong visual and haptic alerts. The current classifier
+recognizes emergency sirens, car horns, breaking glass, crying babies, and door
+knocks.
 
-## Getting Started
+## Current capabilities
 
-This project is a starting point for a Flutter application.
+- continuous foreground microphone monitoring;
+- fully on-device YAMNet and TensorFlow Lite inference;
+- configurable sound classes and minimum confidence;
+- Android vibration and high-priority camera-flash alerts;
+- persistent alert history; and
+- local preferences with no account or network dependency.
 
-A few resources to get you started if this is your first Flutter project:
+Name Watch is intentionally paused. Its experimental source files remain in the
+repository, but it is not exposed in application navigation.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Run locally
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```powershell
+flutter pub get
+flutter analyze
+flutter test
+flutter run
+```
+
+Microphone capture is intended for Android, iOS, and macOS. Native vibration and
+flash effects are currently implemented only for Android.
+
+## Model assets
+
+The default engine loads:
+
+- `assets/models/yamnet.tflite`
+- `assets/models/smart_ear_yamnet_head.tflite`
+- `assets/models/yamnet_model_metadata.json`
+
+The legacy classifier remains available for development builds with
+`--dart-define=SMART_EAR_AI_ENGINE=legacy`.
+
+## Work requiring physical-device validation
+
+Before release, test the five sound classes on representative phones and tune
+thresholds using real environmental recordings. Long-running microphone use,
+battery consumption, interruptions, camera flash behavior, and background
+monitoring also require device testing. Background monitoring is deliberately
+not enabled until those measurements are available.
+
+Release signing and a permanent Android application ID must be configured before
+publishing an APK or app bundle.

@@ -7,7 +7,7 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'edge_ai_service.dart';
 
 class YamnetEdgeAiService implements SoundInferenceService {
-  static const double _maximumOperationalThreshold = 0.80;
+  static const double _babyCryingOperationalThreshold = 0.80;
   static const int _sampleRate = 16000;
   static const int _inputSeconds = 5;
   static const int _inputSamples = _sampleRate * _inputSeconds;
@@ -104,10 +104,9 @@ class YamnetEdgeAiService implements SoundInferenceService {
     var selectedMargin = double.negativeInfinity;
     for (final entry in probabilities.entries) {
       final trainedThreshold = _thresholds[entry.key] ?? 0.5;
-      final operationalThreshold = math.min(
-        trainedThreshold,
-        _maximumOperationalThreshold,
-      );
+      final operationalThreshold = entry.key == 'baby_crying'
+          ? math.min(trainedThreshold, _babyCryingOperationalThreshold)
+          : trainedThreshold;
       final margin = entry.value - operationalThreshold;
       if (margin >= 0 && margin > selectedMargin) {
         selected = entry.key;
